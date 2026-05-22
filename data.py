@@ -746,7 +746,29 @@ def _build_ow_simulation_inputs(devices, conns):
     if graph:
         n_q = max(max(edge) for edge in graph)
 
-    ins = []
+    in_to_q = {}
+    for c in conns:
+        con = json.loads(c.line_json)
+        src_id = con[0]["source"]["node"]
+        tgt_id = con[0]["target"]["node"]
+        src = by_id.get(src_id)
+        tgt = by_id.get(tgt_id)
+        if not src or not tgt:
+            continue
+        if src.type == "IN" and tgt.type == "Q":
+            in_dev, q_dev = src, tgt
+        elif src.type == "Q" and tgt.type == "IN":
+            in_dev, q_dev = tgt, src
+        else:
+            continue
+        in_idx = _parse_ow_device_index(in_dev)
+        q_idx = _parse_ow_device_index(q_dev)
+        if in_idx is None or q_idx is None:
+            return None, "Each IN/Q node in a connection must have a valid index."
+        if in_idx in in_to_q and in_to_q[in_idx] != q_idx:
+            return None, "IN %s is connected to more than one Q node." % in_idx
+        in_to_q[in_idx] = q_idx
+
     observables = []
     results = []
     in_indices_seen = set()
@@ -759,7 +781,6 @@ def _build_ow_simulation_inputs(devices, conns):
             if idx in in_indices_seen:
                 return None, "Duplicate IN index: %s" % idx
             in_indices_seen.add(idx)
-            ins.append(idx)
         elif d.type == "Q":
             if idx in q_indices_seen:
                 return None, "Duplicate Q index: %s" % idx
@@ -773,7 +794,11 @@ def _build_ow_simulation_inputs(devices, conns):
         if _ow_result_specified(d):
             results.append([node, int(d.result)])
 
-    ins.sort()
+    ins = []
+    for in_idx in sorted(in_indices_seen):
+        if in_idx not in in_to_q:
+            return None, "IN %s is not connected to a Q node." % in_idx
+        ins.append(in_to_q[in_idx])
     observables.sort(key=lambda x: x[0])
     results.sort(key=lambda x: x[0])
     return (graph, ins, observables, results), None
