@@ -1,12 +1,12 @@
 /*
     table must have: create_button, update_button, cancel_button, new_element text field, temp hidden field
 */
-function refreshTableAfterChange(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix) {
+function refreshTableAfterChange(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix, project_kind) {
     if (object_type === "Project" && typeof window.refreshProjectTables === "function") {
         window.refreshProjectTables();
         return;
     }
-    update_table(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix);
+    update_table(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix, project_kind);
 }
 
 function delete_handler(params) {
@@ -14,9 +14,13 @@ function delete_handler(params) {
         refreshTableAfterChange(params.table_id, params.object_type, params.fields, params.click_handler, params.parent_key, params.edit_preload, params.edit_presend, params.row_id_prefix || "");
     });	
 }
-function update_table(table_id, object_type, fields, click_handler, parent_key, edit_preload = null, edit_presend = null, row_id_prefix = "") {
+function update_table(table_id, object_type, fields, click_handler, parent_key, edit_preload = null, edit_presend = null, row_id_prefix = "", project_kind = null) {
     $("#" + table_id + " tbody").empty();
-	$.get('/cycle_objects/', {object_type: object_type, parent_key: parent_key }, function(json) {
+    var cycleParams = {object_type: object_type, parent_key: parent_key};
+    if (object_type === "Project") {
+        cycleParams.project_kind = project_kind || "lo";
+    }
+	$.get('/cycle_objects/', cycleParams, function(json) {
         data = JSON.parse(json);
         data.forEach(el => {
             var row_key = row_id_prefix + el[0];
@@ -77,8 +81,8 @@ function update_table(table_id, object_type, fields, click_handler, parent_key, 
 	});
 }
 
-function init_table(table_id, object_type, fields, click_handler, parent_key, edit_preload = null, edit_presend = null, row_id_prefix = "") {
-    update_table(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix);
+function init_table(table_id, object_type, fields, click_handler, parent_key, edit_preload = null, edit_presend = null, row_id_prefix = "", project_kind = null) {
+    update_table(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix, project_kind);
     //
 	// Element Creation
 	//
@@ -91,6 +95,9 @@ function init_table(table_id, object_type, fields, click_handler, parent_key, ed
 		    return;
 		}
         obj = {name: element_name}
+        if (object_type === "Project" && project_kind) {
+            obj.project_kind = project_kind;
+        }
         fields.forEach(f => {
             if (f != "name") {
                 obj[f] = $("#new_element_" + f + "_" + table_id).val();
@@ -98,7 +105,7 @@ function init_table(table_id, object_type, fields, click_handler, parent_key, ed
         });
 	
 		$.post('/add_cycle_object/', {data: JSON.stringify(obj), object_type: object_type, parent_key: parent_key}, function(data) {
-            refreshTableAfterChange(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix);
+            refreshTableAfterChange(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix, project_kind);
 			$("#new_element_" + table_id).val("");
             fields.forEach(f => {
                 elem = $("#new_element_" + f + "_" + table_id);
@@ -129,7 +136,7 @@ function init_table(table_id, object_type, fields, click_handler, parent_key, ed
             }
         });
 		$.post('/update_cycle_object/', {key: key, data: JSON.stringify(obj), object_type: object_type}, function(data) {
-            refreshTableAfterChange(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix);
+            refreshTableAfterChange(table_id, object_type, fields, click_handler, parent_key, edit_preload, edit_presend, row_id_prefix, project_kind);
 			$("#new_element_" + table_id).val("");
             fields.forEach(f => {
                 elem = $("#new_element_" + f + "_" + table_id);

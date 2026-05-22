@@ -135,10 +135,31 @@ class Project(BaseModel):
     name = ndb.StringProperty()
     description = ndb.TextProperty()
     user = ndb.StringProperty()
+    project_kind = ndb.StringProperty(default="lo")
     created = ndb.DateTimeProperty(auto_now_add=True)
     updated = ndb.DateTimeProperty(auto_now=True)
     published = ndb.BooleanProperty(default=False)
     png = ndb.TextProperty()
+
+
+def _project_kind_value(proj):
+    """Classify project for list filtering (LO vs One-Way)."""
+    has_lo = LODevice.query(ancestor=proj.key).count(1, keys_only=True) > 0
+    has_ow = OWDevice.query(ancestor=proj.key).count(1, keys_only=True) > 0
+    if has_ow and not has_lo:
+        return "ow"
+    if has_lo and not has_ow:
+        return "lo"
+    kind = getattr(proj, "project_kind", None)
+    if kind in ("lo", "ow"):
+        return kind
+    return "lo"
+
+
+def _stamp_project_kind(proj, kind):
+    if proj and kind in ("lo", "ow") and getattr(proj, "project_kind", None) != kind:
+        proj.project_kind = kind
+        proj.put()
 
 @with_ndb_context
 def getParentProject():
@@ -172,7 +193,7 @@ def PublishProject(project_key, png):
         proj.published = False
         proj.put()
         return 'OK'
-    if not GetCircuit(project_key):
+    if not GetCircuit(project_key) and not GetOWCircuit(project_key):
         return 'Project is not ready. Simulate it first'
     proj.png = png
     proj.published = True
@@ -224,6 +245,7 @@ def CopyProject(project_key):
         new_proj.name = 'Copy of ' + proj.name
         new_proj.description = proj.description
         new_proj.user = current_user_email()
+        new_proj.project_kind = _project_kind_value(proj)
         new_proj.put()
 
         objects = LODevice.query(ancestor=proj.key).fetch(1000)
@@ -260,6 +282,12 @@ def CopyProject(project_key):
             new_conn = OWConnection(parent=new_proj.key)
             new_conn.line_json = c.line_json
             new_conn.put()
+        ow_circuits = OWCircuit.query(ancestor=proj.key).fetch(1000)
+        for c in ow_circuits:
+            new_circ = OWCircuit(parent=new_proj.key)
+            new_circ.name = c.name
+            new_circ.result = c.result
+            new_circ.put()
         return 'Project is copied!'
     except Exception as ex:
         return str(ex)
@@ -275,7 +303,7 @@ def GetLibrary():
 '
 '
 '''
-object_types = ['Project', 'LODevice', 'LOConnection', 'LOCircuit', 'OWDevice', 'OWConnection']
+object_types = ['Project', 'LODevice', 'LOConnection', 'LOCircuit', 'OWDevice', 'OWConnection', 'OWCircuit']
 
 @with_ndb_context
 def CallCheck(project_key=None):
@@ -306,7 +334,7 @@ def GetObjectByKey(object_type, key):
         return str(ex)
 
 @with_ndb_context
-def CycleObjects(object_type, parent_key):
+def CycleObjects(object_type, parent_key, project_kind=None):
     try:
         if not CallCheck():
             return
@@ -323,6 +351,11 @@ def CycleObjects(object_type, parent_key):
                 ancestor=parent_project.key
             ).fetch(1000)
             objs = [o for o in objs if getattr(o, "name", None) != "ParentOfAllProjects3717481125"]
+            if object_type == "Project":
+                kind_filter = (project_kind or "").strip().lower()
+                if kind_filter not in ("lo", "ow"):
+                    return json.dumps([])
+                objs = [o for o in objs if _project_kind_value(o) == kind_filter]
         else:
             ancestor_key = key_from_str(parent_key)
             if not ancestor_key:
@@ -371,8 +404,14 @@ def AddCycleObject(data, object_type, parent_key):
             instance = data_class(parent=key_from_str(parent_key))
         for key in obj:
             setattr(instance, key, obj[key])
-        if object_type == "Project" and not getattr(instance, "user", None):
-            instance.user = current_user_email()
+        if object_type == "Project":
+            if not getattr(instance, "user", None):
+                instance.user = current_user_email()
+            kind = obj.get("project_kind")
+            if kind in ("lo", "ow"):
+                instance.project_kind = kind
+            elif not getattr(instance, "project_kind", None):
+                instance.project_kind = "lo"
         instance.put()
         return 'OK'
     except Exception as ex:
@@ -470,6 +509,11 @@ class LOCircuit(BaseModel):
     cgate_run_y = ndb.TextProperty()
     cgate_run_z = ndb.TextProperty()
 
+
+class OWCircuit(BaseModel):
+    name = ndb.StringProperty()
+    result = ndb.TextProperty()
+
 @with_ndb_context
 def ClearProjectDesign(key):
     try:
@@ -478,6 +522,7 @@ def ClearProjectDesign(key):
             return "No project"
         if proj.user != current_user_email():
             return "Not authorized"
+        _stamp_project_kind(proj, "lo")
         objects = LODevice.query(ancestor=proj.key).fetch(1000)
         for o in objects:
             o.key.delete()
@@ -499,11 +544,15 @@ def ClearOWDesign(key):
             return "No project"
         if proj.user != current_user_email():
             return "Not authorized"
+        _stamp_project_kind(proj, "ow")
         objects = OWDevice.query(ancestor=proj.key).fetch(1000)
         for o in objects:
             o.key.delete()
         conns = OWConnection.query(ancestor=proj.key).fetch(1000)
         for c in conns:
+            c.key.delete()
+        circuits = OWCircuit.query(ancestor=proj.key).fetch(1000)
+        for c in circuits:
             c.key.delete()
         return "OK"
     except Exception as ex:
@@ -627,6 +676,22 @@ def GetCircuit(project_key):
         if not proj:
             return None
         circuit = LOCircuit.query(ancestor=proj.key).fetch(1)
+        if not circuit:
+            return None
+        if len(circuit) == 0:
+            return None
+        return circuit[0]
+    except Exception:
+        return None
+
+
+@with_ndb_context
+def GetOWCircuit(project_key):
+    try:
+        proj = Project.get(project_key)
+        if not proj:
+            return None
+        circuit = OWCircuit.query(ancestor=proj.key).fetch(1)
         if not circuit:
             return None
         if len(circuit) == 0:
@@ -829,6 +894,15 @@ def ConstructOWCircuit(project_key):
         proj_user = normalize_user_value(proj.user)
         if proj_user and proj_user != user_email:
             return json.dumps({"error": True, "data": "Not authorized"})
+        if not proj_user and user_email:
+            proj.user = user_email
+            proj.put()
+        _stamp_project_kind(proj, "ow")
+
+        circuit = OWCircuit.query(ancestor=proj.key).fetch(1)
+        if circuit:
+            return json.dumps({"error": False, "data": circuit[0].result}, default=str)
+
         devices = OWDevice.query(ancestor=proj.key).fetch(1000)
         conns = OWConnection.query(ancestor=proj.key).fetch(1000)
         inputs, error = _build_ow_simulation_inputs(devices, conns)
@@ -836,7 +910,12 @@ def ConstructOWCircuit(project_key):
             return json.dumps({"error": True, "data": error})
         graph, ins, observables, results = inputs
         vec = owqc.universal_transformation(graph, ins, observables, results)
-        return json.dumps({"error": False, "data": _format_ow_vector_latex(vec)}, default=str)
+        result = _format_ow_vector_latex(vec)
+        circ = OWCircuit(parent=proj.key)
+        circ.result = result
+        circ.name = proj.name
+        circ.put()
+        return json.dumps({"error": False, "data": result}, default=str)
     except Exception as ex:
         return json.dumps({"error": True, "data": str(ex)}, default=str)
 
@@ -854,6 +933,7 @@ def ConstructCircuit(project_key):
         if not proj_user and user_email:
             proj.user = user_email
             proj.put()
+        _stamp_project_kind(proj, "lo")
 
         # check if we already did the calculation
         circuit = LOCircuit.query(ancestor=proj.key).fetch(1)

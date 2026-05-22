@@ -109,7 +109,8 @@ class CycleObjects(BaseHandler):
     def get(self):
         object_type = self.request.get('object_type')
         parent_key = self.request.get('parent_key')
-        self.response.out.write(data.CycleObjects(object_type, parent_key))
+        project_kind = self.request.get('project_kind')
+        self.response.out.write(data.CycleObjects(object_type, parent_key, project_kind))
 class GetObjectByKey(BaseHandler):
     def get(self):
         object_type = self.request.get('object_type')

@@ -31,6 +31,11 @@ $(document).ready(function() {
         container_id = $(this).attr("id") + "_container";
         $("#" + container_id).show();
         syncDesignerFrames();
+        if (container_id === "oneway_container") {
+            update_table("table_owmyprojects", "Project", ["name", "description"], project_click, "current_user", null, null, "", "ow");
+        } else if (container_id === "composer_container") {
+            update_table("table_myprojects", "Project", ["name", "description"], project_click, "current_user", null, null, "", "lo");
+        }
 	});
 
     function syncDesignerFrames() {
@@ -57,32 +62,23 @@ $(document).ready(function() {
     //
     //  Projects table
     //
-    function normalizeProjectKey(key) {
-        if (key.indexOf("ow_") === 0) {
-            return key.substring(3);
-        }
-        return key;
-    }
-
     window.refreshProjectTables = function() {
-        update_table("table_myprojects", "Project", ["name", "description"], project_click, "current_user");
-        update_table("table_owmyprojects", "Project", ["name", "description"], project_click, "current_user", null, null, "ow_");
+        update_table("table_myprojects", "Project", ["name", "description"], project_click, "current_user", null, null, "", "lo");
+        update_table("table_owmyprojects", "Project", ["name", "description"], project_click, "current_user", null, null, "", "ow");
     };
 
     function project_click(key) {
-        var projectKey = normalizeProjectKey(key);
         // show controls    
         $("#current_project").show();
         
         // highlight table row (both LO and OW project lists)
         $(".newspaper-a-selected").removeClass("newspaper-a-selected");
-        $("#" + projectKey).parent('tr').children().addClass("newspaper-a-selected");
-        $("#ow_" + projectKey).parent('tr').children().addClass("newspaper-a-selected");
+        $("#" + key).parent('tr').children().addClass("newspaper-a-selected");
 
         // set up environment
-		$.get('/get_object_by_key/', {object_type: "Project", key: projectKey}, function(json) {
+		$.get('/get_object_by_key/', {object_type: "Project", key: key}, function(json) {
             data = JSON.parse(json);
-            setCurrentProject(projectKey, data["name"], data["description"]);
+            setCurrentProject(key, data["name"], data["description"]);
 		}); 
         $("#simulate").show();
         $("#simulate_x").show();
@@ -109,8 +105,8 @@ $(document).ready(function() {
         if (fidChart) fidChart.destroy();
         $("#charts").hide();
     }
-    init_table("table_myprojects", "Project", ["name", "description"], project_click, "current_user");
-    init_table("table_owmyprojects", "Project", ["name", "description"], project_click, "current_user", null, null, "ow_");
+    init_table("table_myprojects", "Project", ["name", "description"], project_click, "current_user", null, null, "", "lo");
+    init_table("table_owmyprojects", "Project", ["name", "description"], project_click, "current_user", null, null, "", "ow");
     
     //
     //  Various handlers
